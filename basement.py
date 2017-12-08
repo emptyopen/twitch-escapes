@@ -9,82 +9,164 @@ Created on Mon Dec 04 10:53:22 2017
 import random
 import string
 import datetime
+import sys
+import time
 
-from PIL import Image
+from PyQt4 import QtGui
 
 import chat_connect
 
 
 
-# states are:
-# n-wall (has chest)
-# e-wall (has painting)
-# w-wall (has door)
-# s-wall (has bed)
-# chest
-# door
-# bed
-# painting
-# keypad
+class Component(object):
 
+    def __init__(self, text, image_placement, actions):
+        self.text = text  # info, may be deprecated
+        self.image_placement = image_placement  # 3-tuple: horizontal and vertical offset, and then layer placement (n/a:0, on wall:1, in front:2)
+        self.actions = actions  # actions and consequences
+        self.on_wall = ''
 
 class Basement(object):
 
     def __init__(self):
 
-        self.walls = {'n-wall':[], 'e-wall':[], 's-wall':[], 'w-wall':[]}
-        self.spawning_components = ['cipher-chest', 'cipher-painting', 'bed', 'door']
+        self.app = QtGui.QApplication(sys.argv)
+        self.label = QtGui.QLabel()
+
+        self.state = 's-wall'
+        self.inventory = []
+        self.walls = {'n-wall':[['', ''], ['', '', '']], 'e-wall':[['', ''], ['', '', '']], 's-wall':[['', ''], ['', '', '']], 'w-wall':[['', ''], ['', '', '']]}
+        self.win = False
+        self.right_code = '423'
+
+        # twitch IRC
+        self.s = chat_connect.openSocket()
+        chat_connect.joinRoom(self.s)
+        self.readbuffer = ""
 
 
-    def string_components(self): # strings components together in a path to exit
+    def map_components(self): # strings components together in a path to exit
 
-        pass
+        self.components_to_place = ['cipher-chest', 'cipher-painting', 'door', 'bed']
+
+        # ensure there are enough spaces on walls when choosing components
 
 
     def place_components(self): # puts components on wall (for drawing)
 
-        for component in self.spawning_components:
-            random_wall = random.choice(['n-wall', 'e-wall', 's-wall', 'w-wall'])
-            self.walls[random_wall].append(component)
+        # define all components
+        self.components = { 'n-wall': Component('The North wall.', [0, 0, 0], {'left':'w-wall', 'right':'e-wall'}),
+                            'e-wall': Component('The East wall.', [0, 0, 0], {'left':'n-wall', 'right':'s-wall'}),
+                            's-wall': Component('The South wall.', [0, 0, 0], {'left':'e-wall', 'right':'w-wall'}),
+                            'w-wall': Component('The West wall.', [0, 0, 0], {'left':'s-wall', 'right':'n-wall'}),
+                            'cipher-chest': Component( 'A chest.', [0, 0, 2], {}),
+                            'cipher-painting': Component('A painting.', [0, 0, 1], {}),
+                            'door': Component('A door. There\'s a keypad.', [0, 0, 1], {'keypad':'keypad'}),
+                            'bed': Component('A bed.', [0, 0, 2], {}),
+                            'keypad': Component('A keypad.', [0, 0, 0], {'back': 'door', self.right_code: 'outside'})
+                          }
+
+        cnt = 0
+        for component in self.components_to_place:
+            not_done_placing_component = True
+            while not_done_placing_component:
+                random_wall = random.choice(['n-wall', 'e-wall', 's-wall', 'w-wall'])
+                if self.components[component].image_placement[2] == 1: # if component is to be placed on wall
+                    self.walls[random_wall][0][random.choice([spot for spot in [0,1] if self.walls[random_wall][0][spot] == ''])] = component
+                    self.components[random_wall].actions[component] = component
+                    self.components[component].on_wall = random_wall
+                    not_done_placing_component = False
+                if self.components[component].image_placement[2] == 2: # if component is to be placed in front of wall
+                    self.walls[random_wall][1][random.choice([spot for spot in [0,2] if self.walls[random_wall][1][spot] == ''])] = component
+                    self.components[random_wall].actions[component] = component
+                    self.components[component].on_wall = random_wall
+                    not_done_placing_component = False
+                cnt += 1
+                if cnt > 50: # in case of unexpected endless loop
+                    print('------------something unexpected: breaking!!')
+                    break
         print(self.walls)
+
+        for component in self.components: # add the back option for components
+            self.components[component].actions['back'] = self.components[component].on_wall
 
 
     def update_image(self):
 
-        pass
+        self.im = QtGui.QImage('pics/{}.png'.format(self.state))
+
+        painter = QtGui.QPainter()
+
+        if 'wall' not in self.state:
+            self.im = QtGui.QImage('pics/{}-full.png'.format(self.state))
+
+
+        if 'wall' in self.state:
+            layers = self.walls[self.state]
+            print(layers)
+
+            for i, layer in enumerate(layers): # starting in the back
+                # i is [0,1]
+                for j, spot in enumerate(layer):
+                    # j is [0,1] or [0,1,2] depending on layer
+                    # i controls vertical placement, j controls horizontal placement
+                    if spot in self.components:
+                        component = spot
+                        c_image = QtGui.QImage('pics/{}.png'.format(component))
+
+                        c_image_offset = [c_image.width()/2, c_image.height()/2]
+                        print(c_image_offset)
+
+                        if i == 0:
+                            vert_plac = 186
+                            if j == 0:
+                                horz_plac = 324
+                            elif j == 1:
+                                horz_plac = 556
+                        elif i == 1:
+                            vert_plac = 312
+                            horz_plac = 220 * (i+1)
+
+                        # overlay images
+                        painter.begin(self.im)
+                        painter.drawImage(horz_plac, vert_plac, c_image)
+                        painter.end()
+
+
+
+        self.label.setPixmap(QtGui.QPixmap.fromImage(self.im))
+        self.label.show()
 
 
     def get_twitch_chat(self): # returns ten seconds of twitch chat
 
-        s = chat_connect.openSocket()
-        chat_connect.joinRoom(s)
-        readbuffer = ""
-
         timer_start = datetime.datetime.now()
         thing = 0
 
-        while datetime.datetime.now() - timer_start < datetime.timedelta(0,10,0):
-            readbuffer = readbuffer + s.recv(1024)
-            temp = string.split(readbuffer, '\n')
-            readbuffer = temp.pop()
+        messages = []
+
+        while datetime.datetime.now() - timer_start < datetime.timedelta(0, 15, 0):
+            self.readbuffer = self.readbuffer + self.s.recv(1024)
+            temp = string.split(self.readbuffer, '\n')
+            self.readbuffer = temp.pop()
             for line in temp:
-                print(line)
+                #print(line)
                 if 'PING' in line:
-                    s.send(line.replace('PING', 'PONG'))
+                    self.s.send(line.replace('PING', 'PONG'))
                     break
                 user = chat_connect.getUser(line)
                 message = chat_connect.getMessage(line)
-                print(user + 'typed:' + message)
+                print(user + ' typed:' + message)
 
-                if 'thinga' in line:
-                    thing += 1
+                messages.append(message)
 
-        return thing
+        return messages
 
 
     def parse_twitch_chat(self, possible_actions):
 
-        chat = self.get_twitch_chat()
+        chat = [x[:-1] for x in self.get_twitch_chat()]
+        #print(chat)
 
         if len(chat) > 0:
             votes = {action:0 for action in possible_actions}
@@ -101,10 +183,14 @@ class Basement(object):
         else:
             rc = 'stay'
 
+        print(rc)
         return rc
 
+    def fake(self):
+        return 'left'
 
     def basic_cipher(self):
+
         self.quote_text = 'an investment in knowledge pays the best interest.' #benjamin franklin
         self.cipher_number = random.randint(1, 24)
         self.cipher_text = ''.join([chr((ord(x) - 96 + self.cipher_number) % 26 + 1 + 96) if x.isalpha() else x for x in self.quote_text])
@@ -113,132 +199,83 @@ class Basement(object):
 
     def play_game(self):
 
-        # initial setting
-        win = False
-        state = 's-wall'
-        inventory = []
-        right_code = '423'
+        while True:
 
-        self.generate_components()
+            self.map_components()
+            self.place_components()
 
-        #self.walls = {'n-wall':['chest'], 'e-wall':['painting'], 's-wall':['bed'], 'w-wall':['door']}
+            # basement
+            while self.win == False:
 
-        # basement
-        while win == False:
+                ### Update graphics / text
 
-            if state == 'n-wall':
-                #image = Image.open('n-wall.jpg')
-                #image.show()
-                print('The North wall. There\'s {}.'.format(self.walls['n-wall']))
-            elif state == 'e-wall':
-                print('The East wall. There\'s {}.'.format(self.walls['e-wall']))
-            elif state == 's-wall':
-                print('The South wall. There\'s {}.'.format(self.walls['s-wall']))
-            elif state == 'w-wall':
-                print('The West wall. There\'s {}.'.format(self.walls['w-wall']))
-            elif state == 'bed':
-                print('A bed.')
-            elif state == 'door':
-                print('A door. There\'s a keypad.')
-            elif state == 'painting':
-                print('A painting.')
-            elif state == 'chest':
-                print('A chest.')
-            elif state == 'keypad':
-                print('A keypad.')
+                self.update_image()
 
+                for component in self.components:
+                    if self.state == component:
+                        print(self.components[component].text)
 
-            always_actions = ['n-wall', 'e-wall', 'w-wall', 's-wall']
+                ### Determine possible actions
 
-            if state == 'n-wall':
-                possible_actions = ['left', 'right'] + [x for x in self.walls['n-wall']]
-            elif state == 'e-wall':
-                possible_actions = ['left', 'right'] + [x for x in self.walls['e-wall']]
-            elif state == 's-wall':
-                possible_actions = ['left', 'right'] + [x for x in self.walls['s-wall']]
-            elif state == 'w-wall':
-                possible_actions = ['left', 'right'] + [x for x in self.walls['w-wall']]
+                always_actions = ['n-wall', 'e-wall', 'w-wall', 's-wall']
 
-            elif state == 'bed':
-                possible_actions = ['back']
-            elif state == 'door':
-                possible_actions = ['keypad', 'back']
-            elif state == 'painting':
-                possible_actions = ['back']
-            elif state == 'chest':
-                possible_actions = ['back']
-            elif state == 'keypad':
-                possible_actions = [right_code, 'back']
+                possible_actions = []
 
-            print('Possible actions: {}\n'.format(possible_actions))
+                for component in self.components:
+                    if self.state == component:
+                        possible_actions = self.components[component].actions.keys()
 
-            action = self.parse_twitch_chat(possible_actions)
-            #action = raw_input('next action? ')
+                # move these to place_components eventually
+                # add possible actions from wall to component
+                if self.state == 'n-wall':
+                    possible_actions += [x for x in self.components if self.components[x].on_wall == 'n-wall']
+                elif self.state == 'e-wall':
+                    possible_actions += [x for x in self.components if self.components[x].on_wall == 'e-wall']
+                elif self.state == 's-wall':
+                    possible_actions += [x for x in self.components if self.components[x].on_wall == 's-wall']
+                elif self.state == 'w-wall':
+                    possible_actions += [x for x in self.components if self.components[x].on_wall == 'w-wall']
+
+                print('Possible actions: {}\n'.format(possible_actions))
 
 
-            if action in possible_actions:
-                if state == 'n-wall':
-                    if action == 'left':
-                        state = 'w-wall'
-                    elif action == 'right':
-                        state = 'e-wall'
-                elif state == 'e-wall':
-                    if action == 'left':
-                        state = 'n-wall'
-                    elif action == 'right':
-                        state = 's-wall'
-                elif state == 's-wall':
-                    if action == 'left':
-                        state = 'e-wall'
-                    elif action == 'right':
-                        state = 'w-wall'
-                elif state == 'w-wall':
-                    if action == 'left':
-                        state = 's-wall'
-                    elif action == 'right':
-                        state = 'n-wall'
-                elif state == 'bed':
-                    if action == 'back':
-                        state = [x for x in self.walls if 'bed' in self.walls[x]][0]
-                elif state == 'door':
-                    if action == 'keypad':
-                        state = 'keypad'
-                    elif action == 'back':
-                        state = [x for x in self.walls if 'door' in self.walls[x]][0]
-                elif state == 'painting':
-                    if action == 'back':
-                        state = [x for x in self.walls if 'painting' in self.walls[x]][0]
-                elif state == 'chest':
-                    if action == 'back':
-                        state = [x for x in self.walls if 'chest' in self.walls[x]][0]
-                elif state == 'keypad':
-                    if action == 'back':
-                        state = 'door'
-                    elif action == right_code:
-                        state == 'outside'
-                        win = True
+                ### Decide action
 
-                for component in self.spawning_components:          # moving from wall to component
-                    if action == component and [x for x in self.walls if component in self.walls[x]][0] == state:
-                        state = component
+                #action = self.parse_twitch_chat(possible_actions)
+                #action = self.fake()
+                action = raw_input('next action? ') # for working offline
+                #execfile("test2.py")
 
+                print('-----------------action', action, type(action))
 
-                print('moved to: {}'.format(state))
+                if action == 'qq':
+                    break
 
+                ### Update state based on action
+                if action in possible_actions:
+                    for component in self.components:
+                        if self.state == component:
+                            print('attempting {} from {}'.format(action, self.state))
+                            print(self.components[component].actions)
+                            self.state = self.components[component].actions[action]
+                            print('moved to: {}'.format(self.state))
+                            break
 
+                    if self.state == 'outside':
+                        self.win = True
 
+            print('\nYou\'re free yay! Let\'s play a new game :)')
 
-
-        print('\nYou\'re free yay!')
 
 
 
 
 B = Basement()
-#B.play_game()
+B.play_game()
+
 #B.basic_cipher()
 
-print(B.get_twitch_chat())
+#print(B.get_twitch_chat())
 #B.parse_twitch_chat(['left','right','bed'])
 
 

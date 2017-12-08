@@ -1,12 +1,14 @@
 import string
 import socket
 import datetime
+import os
 
 HOST = "irc.twitch.tv"
 PORT = 6667
-PASS = 'oauth:'
 
-### bring in oath from text file
+f = open(os.pardir + '/oauth.txt')
+PASS = f.read()
+f.close()
 
 IDENT = 'escape_bot'
 CHANNEL = 'twitch_escapes'
@@ -43,7 +45,7 @@ def joinRoom(s):
 		readbuffer = temp.pop()
 
 		for line in temp:
-			print(line)
+			###print(line)
 			Loading = loadingComplete(line)
 	sendMessage(s, "Successfully joined chat")
 
