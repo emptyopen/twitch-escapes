@@ -32,9 +32,14 @@ def getUser(line):
 	return user
 
 def getMessage(line):
-	separate = line.split(":", 2)
-	message = separate[2]
-	return message
+	if ':' in line:
+		separate = line.split(":", 2)
+		if len(separate) > 2:
+			return separate[2]
+		else:
+			return separate[-1]
+	else:
+		return line
 
 def joinRoom(s):
 	readbuffer = ""
@@ -57,65 +62,5 @@ def loadingComplete(line):
 
 
 
-'''
-def one_game():
 
-
-    game = True
-
-    while game:
-
-        start_vote_timer = datetime.datetime.now()
-
-        while True:    # one iteration of voting
-        	readbuffer = readbuffer + s.recv(1024)
-        	temp = string.split(readbuffer, "\n")
-        	readbuffer = temp.pop()
-
-        	for line in temp:
-        		print(line)
-        		if "PING" in line:
-        			s.send(line.replace("PING", "PONG"))
-        			break
-        		user = getUser(line)
-        		message = getMessage(line)
-        		print user + " typed :" + message
-	        if datetime.datetime.now() - start_vote_timer > datetime.timedelta(0,20,0):
-                print('vote time reached!')
-                print('vote is {}'.format(message))
-                break
-'''
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-'''
-while True:
-		readbuffer = readbuffer + s.recv(1024)
-		temp = string.split(readbuffer, "\n")
-		readbuffer = temp.pop()
-
-		for line in temp:
-			print(line)
-			if "PING" in line:
-				s.send(line.replace("PING", "PONG"))
-				break
-			user = getUser(line)
-			message = getMessage(line)
-			print user + " typed :" + message
-			if "You Suck" in message:
-				sendMessage(s, "No, you suck!")
-				break
-'''
+###
