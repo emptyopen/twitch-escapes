@@ -4,22 +4,23 @@
 # last major update 2017-12-15
 #
 
-from pygame.locals import *
-
 import random
 import string
-import datetime
+import datetime as dt
 import sys
 import time
 import os
 import numpy as np
-
 import pygame
+from pygame.locals import QUIT
+import textwrap
+
+from config import *
 
 pygame.font.init()
+#print(sorted(pygame.font.get_fonts()))
 
-DECISIONTIME = 14 # +7 seconds for lag
-DEBUG = True
+BASETIME = dt.datetime.now()
 
 # conda install -c anaconda libpng # for interlace issue
 # need 32 bit png
@@ -31,41 +32,41 @@ DEBUG = True
 #   add state update
 #   add display update
 
-# to add:
+# to do:
 #
-# player control (via chat command)
+# new puzzles:
+#  numbers on the wall for a code?
+#  ice puzzles
+#  spinning wheels ??
 #
-# implement successful chain of puzzles:
-#   add power inhibit
-#
-# better font for messages (from cristina)
+# highlight glow of new component:
+#   add removal upon sight as well
 #
 # fix up multiple screens. known issues:
 #   implement twitch timing for multiple screens
 #   help function has issues
+#   player control (via chat command)
+#   highlight active screen
 #
-# numbers on the wall for a code?
-#
-# ice puzzles
-# spinning wheels ??
+# add 'graphical delay' (ignore everything except update in if statement)
 #
 # trophies
 #
 # graphical inventory
 #
-# journal (log of in game events)
+# journal (log of in game events) (create screen for it)
 #
 # MULTIPLE TRACKS (CHAINS), each ending in a clue for a digit of the keypad
+#
 #
 
 class Component(object):
 
-    def __init__(self, description, image_placement, actions_to_state = {}, actions_to_inventory = {}, actions_to_event = {}, endpoints = [[], []]):
+    def __init__(self, description, image_placement, actions_to_state = {}, actions_to_inventory = {}, endpoints = [[], []]):
         self.description = description
         self.image_placement = image_placement  # 3-tuple: horizontal and vertical offset, and then depth (n/a:0, on wall:1, in front:2)
         self.actions_to_state = actions_to_state  # actions and consequences
         self.actions_to_inventory = actions_to_inventory
-        self.actions_to_event = actions_to_event
         self.endpoints = endpoints
 
         self.powered = True
@@ -82,26 +83,38 @@ class Game:
         self.caption = "Twitch Escapes"
         self.fps = 60
         self.clock = pygame.time.Clock()
-        self.screen = pygame.display.set_mode((1800, 703))  # (890, 503) , 200 vert for black, 20 margin
+        if DEBUG:
+            self.screen = pygame.display.set_mode((890, 717))
+        else:
+            self.screen = pygame.display.set_mode((1800, 717))  # (890, 503) , 214 vert for black, 20 margin
         self.background = pygame.image.load('pics/n-wall.png')
         self.one_off = True # toggler that ensures screen updates after state update?
         self.p_offset = [0, 0] # offset for multiple screens
 
         # game state
-        self.p = 0 # player state to display or update
-        self.state = ['n-wall', 's-wall']
-        self.action = ['stay', 'stay']
+        self.s = 0 # player state to display or update
+        if DEBUG:
+            self.num_players = [1]
+            self.state = ['n-wall']
+            self.action = ['stay']
+        else:
+            self.num_players = [1, 2] # extremely powerful
+            self.state = ['n-wall', 's-wall'] # THESE 3 NEED TO BE THE SAME SIZE
+            self.action = ['stay', 'stay']
+        #self.timer_start = [dt.datetime.now(), dt.datetime.now() - dt.timedelta(DECISIONTIME / 2)]
+        self.timer_start = [dt.datetime.now(), dt.datetime.now() - dt.timedelta(seconds = 5)]
         self.win = False
         self.help = False
-        self.center_message = ['', (0,0), datetime.datetime.now(), datetime.timedelta(0,0,0)]
-        self.votes = {}
-        self.visible_votes = {}
+        self.center_message = ['', (0,0), dt.datetime.now(), dt.timedelta(0,0,0)]
+        self.votes = {s:{} for s in self.num_players}
         self.inventory = []
+        self.journal = ['Welcome to the Basement!']
+        self.new_component_glow = [None, dt.datetime.now() + dt.timedelta(seconds = 0)]
 
         # game initialization reqs
+        self.player_groups = {1:[], 2:[]} # which users are dedicated to which players
         self.components_order = []
         self.bridges = []
-        self.timer_start = datetime.datetime.now()
         self.walls = {'n-wall':[['', ''], ['', '', '']], 'e-wall':[['', ''], ['', '', '']], 's-wall':[['', ''], ['', '', '']], 'w-wall':[['', ''], ['', '', '']]}
         self.keypad_code = str(random.randint(100, 999))
         print('end:', self.keypad_code)
@@ -109,28 +122,28 @@ class Game:
 
     def map_components(self): # strings components together in a path to exit
 
-        # define all components: description, image_placement (n/a:0, on wall:1, in front:2), actions_to_state, actions_to_inventory, actions_to_event, endpoints
-            self.components = { 'n-wall': Component('North wall', [0, 0, 0], {'left':'w-wall', 'right':'e-wall'}, {}, {}, [[], []]),
-                                'e-wall': Component('East wall', [0, 0, 0], {'left':'n-wall', 'right':'s-wall'}, {}, {}, [[], []]),
-                                's-wall': Component('South wall', [0, 0, 0], {'left':'e-wall', 'right':'w-wall'}, {}, {}, [[], []]),
-                                'w-wall': Component('West wall', [0, 0, 0], {'left':'s-wall', 'right':'n-wall'}, {}, {}, [[], []]),
-                                'trophycase': Component('A trophy case', [0, 0, 1], {}, {}, {}, [['knowledge'], ['inventory']]),
-                                'door': Component('The exit door', [0, -33, 1], {'keypad':'keypad'}, {}, {}, [[], []]),
-                                'keypad': Component('A keypad', [0, 0, 0], {'back': 'door', self.keypad_code: 'outside'}, {}, {}, [['inventory', 'knowledge-keypadcode'], []]),
-                                'cpainting': Component('A cipher painting', [0, 0, 1], {}, {}, {}, [['uncover', 'start'], ['cipherlink']]),
-                                'cchest': Component('A cipher chest', [0, -45, 2], {}, {}, {}, [['cipherlink'], ['inventory']]),
-                                'bed': Component('A bed', [0, -20, 2], {}, {}, {}, [[], []]),
-                                'simonsays': Component('A simon says game', [0, -30, 2], {}, {}, {}, [['inventory', 'power'], ['uncover', 'power', 'knowledge-keypadcode']]),
-                                'amidakuji': Component('Amidakuji', [0, 0, 1], {}, {}, {}, [['start', 'uncover'], ['knowledge-5colororder']]),
-                                'family': Component('The family game', [0, 0, 1], {}, {}, {}, [['knowledge-5colororder'], ['uncover', 'power']]),
-                                'secretsafe': Component('A desk', [0, 0, 1], {}, {}, {}, [['uncover'], ['inventory']]),
-                                'keychest': Component('A chest with a keyhole', [0, 0, 2], {}, {}, {}, [['inventory'], ['inventory']]),
-                                'comchest': Component('A chest with a combination', [0, 0, 2], {}, {}, {}, [['knowledge'], ['inventory']]),
-                                'hangman': Component('A game of hangman', [0, 0, 1], {}, {}, {}, [['start', 'uncover', 'power'], ['uncover', 'power']]),
-                                'blockpush': Component('A game of push the block', [0, 0, 1], {}, {}, {}, [['start', 'inventory', 'uncover', 'power'], ['uncover', 'power', 'knowledge-keypadcode']])
+        # define all components: description, image_placement (n/a:0, on wall:1, in front:2), actions_to_state, actions_to_inventory, endpoints
+            self.components = { 'n-wall': Component('North wall', [0, 0, 0], {'left':'w-wall', 'right':'e-wall'}, {}, [[], []]),
+                                'e-wall': Component('East wall', [0, 0, 0], {'left':'n-wall', 'right':'s-wall'}, {}, [[], []]),
+                                's-wall': Component('South wall', [0, 0, 0], {'left':'e-wall', 'right':'w-wall'}, {}, [[], []]),
+                                'w-wall': Component('West wall', [0, 0, 0], {'left':'s-wall', 'right':'n-wall'}, {}, [[], []]),
+                                'trophycase': Component('A trophy case', [0, 0, 1], {}, {}, [['knowledge'], ['inventory']]),
+                                'door': Component('The exit door', [0, -33, 1], {'keypad':'keypad'}, {}, [[], []]),
+                                'keypad': Component('A keypad', [0, 0, 0], {'back': 'door', self.keypad_code: 'outside'}, {}, [['inventory', 'knowledge-keypadcode'], []]),
+                                'cpainting': Component('A cipher painting', [0, 0, 1], {}, {}, [['uncover', 'start'], ['cipherlink']]),
+                                'cchest': Component('A cipher chest', [0, -45, 2], {}, {}, [['cipherlink'], ['inventory']]),
+                                'bed': Component('A bed', [0, -20, 2], {}, {}, [[], []]),
+                                'simonsays': Component('A simon says game', [0, -30, 2], {}, {}, [['start', 'power'], ['uncover', 'power', 'knowledge-keypadcode']]),
+                                'amidakuji': Component('Amidakuji', [0, 0, 1], {}, {}, [['start', 'uncover'], ['knowledge-5colororder']]),
+                                'family': Component('The family game', [0, 0, 1], {}, {}, [['knowledge-5colororder'], ['uncover', 'power']]),
+                                'secretsafe': Component('A desk', [0, 0, 1], {}, {}, [['uncover'], ['inventory']]),
+                                'keychest': Component('A chest with a keyhole', [0, 0, 2], {}, {}, [['inventory'], ['inventory']]),
+                                'comchest': Component('A chest with a combination', [0, 0, 2], {}, {}, [['knowledge'], ['inventory']]),
+                                'hangman': Component('A game of hangman', [0, 0, 1], {}, {}, [['start', 'uncover', 'power'], ['uncover', 'power']]),
+                                'blockpush': Component('A game of push the block', [0, 0, 1], {}, {}, [['start', 'inventory', 'uncover', 'power'], ['uncover', 'power', 'knowledge-keypadcode']]),
+                                'riddler': Component('A riddle game', [0, 0, 2], {}, {}, [['start', 'power'], ['uncover', 'power', 'knowledge-keypadcode']])
                                 }
 
-            #self.components_to_place = self.generate_puzzle_chain()
             self.generate_puzzle_chain()
 
     def generate_puzzle_chain(self):
@@ -170,8 +183,8 @@ class Game:
             self.bridges.append(random.choice([x for x in current_end if x in next_begin]))
 
         # manual order and placement
-        self.components_order = ['hangman', 'blockpush', 'amidakuji', 'family', 'cpainting', 'cchest', 'keypad']
-        self.bridges = ['uncover', 'uncover', 'knowledge-5colororder', 'uncover', 'cipherlink', 'inventory']
+        self.components_order = ['riddler', 'hangman', 'blockpush', 'amidakuji', 'family', 'cpainting', 'cchest', 'keypad']
+        self.bridges = ['power', 'uncover', 'uncover', 'knowledge-5colororder', 'uncover', 'cipherlink', 'inventory']
 
         print(self.components_order, self.bridges)
 
@@ -188,6 +201,8 @@ class Game:
                 self.setup_blockpush()
             if c == 'hangman':
                 self.setup_hangman()
+            if c == 'riddler':
+                self.setup_riddler()
             if i > 0:
                 if self.bridges[i-1] == 'uncover':
                     self.components[c].visible = False
@@ -228,6 +243,8 @@ class Game:
             if self.components[component].on_wall != '':
                 self.components[component].actions_to_state['back'] = self.components[component].on_wall
 
+        print(self.walls)
+
 
     def setup_cipher(self):
 
@@ -249,7 +266,7 @@ class Game:
     def setup_simon_says(self):
 
         self.simon_says_pattern = [random.choice(['blue','red','green','yellow']) for _ in range(5)]
-        #print(self.simon_says_pattern)
+        print(self.simon_says_pattern)
         self.simon_says_current_pattern = []
         self.simon_says_user_guess = []
 
@@ -273,15 +290,15 @@ class Game:
 
     def setup_family(self):
 
-        family_members = ['daddy', 'mommy', 'lil-joe', 'meghan', 'carter-iii', 'skip', 'bob-the-fish']
+        family_members = ['daddy', 'mommy', 'lil-joe', 'janice', 'carter-iii', 'skip', 'bob-the-fish']
         self.family_members_order = random.sample(family_members, 6)
         self.family_members_color_order = {n:self.amidakuji_colors_order[i] for i, n in enumerate(self.family_members_order)}
         self.family_members_color_order_inv = {v: k for k, v in self.family_members_color_order.iteritems()}
-        #print('family members color order:   {}'.format(self.family_members_color_order))
 
-        self.correct_family_order = ' '.join([self.family_members_color_order_inv[self.amidakuji_map[x]] for x in self.amidakuji_map])
+        self.correct_family_order = [self.family_members_color_order_inv[self.amidakuji_map[x]] for x in self.amidakuji_map]
+        self.correct_family_order = [' '.join(self.correct_family_order)] + [''.join([x[0] for x in self.correct_family_order])] + [' '.join([x[0] for x in self.correct_family_order])]
+
         print('correct family order', self.correct_family_order)
-        self.components['family'].actions_to_event[self.correct_family_order] = 'complete' # combine all actions?
 
 
     def setup_blockpush(self):
@@ -341,21 +358,35 @@ class Game:
         self.blockpush_start = start
         self.blockpush_end = end
 
-        self.components['blockpush'].actions_to_event['up'] = 'block-up'
-        self.components['blockpush'].actions_to_event['down'] = 'block-down'
-        self.components['blockpush'].actions_to_event['left'] = 'block-left'
-        self.components['blockpush'].actions_to_event['right'] = 'block-right'
-
         print(self.blockpush_grid, self.blockpush_block)
 
 
     def setup_hangman(self):
         possible_qs = ['testing testing', 'the dog and the cat', 'geronimous']
-        self.phrase = random.choice(possible_qs)
-        self.hangman_guess = ['_' if c.isalpha() else ' ' for c in self.phrase]
-        print(self.phrase, self.hangman_guess)
+        self.hangman_phrase = random.choice(possible_qs)
+        self.hangman_guess = ['_' if c.isalpha() else ' ' for c in self.hangman_phrase]
+        print(self.hangman_phrase, self.hangman_guess)
         self.hangmanstate = 0
 
+
+    def setup_riddler(self):
+        possible_riddles = [['I\'m tall when I\'m young and I\'m short when I die. What am I?', 'candle'],
+                            ['A pants pocket is empty, but it still has something in it. What?', 'hole'],
+                            ['Throw away the outside and cook the inside, then eat the outside and throw away the inside. What am I?', 'corn'],
+                            ['What word becomes shorter when you add to letters to it?', 'short'],
+                            ['What occurs once in a minute, twice in a moment, but never in ten thousand years?', 'm'],
+                            ['What five letter word sounds the same if you take away the 1st, 3rd, and 5th letter?', 'empty'],
+                            ['What is at the end of a rainbow?', 'w'],
+                            ['What is so delicate that saying it\'s name breaks it?', 'silence'],
+                            ['What is the center of gravity?', 'v'],
+                            ['What is the next letter in the sequence JFMAMJJASON_?', 'd'],
+                            ['When you need me, you throw me away. When you\'re done using me, you bring me back. What am I?', 'anchor'],
+                            ['What is yours but is used almost exclusively by everyone else?', 'name'],
+                            ['I\'m lighter than a feather, but the strongest man in the world cannot hold me for more than an hour. What am I?', 'breath']]
+        riddle = random.choice(possible_riddles)
+        self.riddler_riddle = riddle[0]
+        self.riddler_answer = riddle[1]
+        print(self.riddler_riddle, self.riddler_answer)
 
 
 # -------------------------------------------------------------------------------------------------------------------- EXECUTE
@@ -367,6 +398,8 @@ class Game:
         pygame.display.set_caption(self.caption)
         self.map_components()
         self.place_components()
+        if not DEBUG:
+            self.create_vote_timing_commands()
 
         while True: # main game loop
 
@@ -386,24 +419,21 @@ class Game:
 
         if self.one_off:
 
-            p = self.p
+            s = self.s
 
-            if True: # disable for cycling players
-                p = 1
-
-            if datetime.datetime.now() - self.timer_start > datetime.timedelta(0, DECISIONTIME, 0):
-                self.timer_start = datetime.datetime.now()
+            if not DEBUG:
+                if dt.datetime.now() - self.timer_start[s] > dt.timedelta(0, DECISIONTIME, 0):
+                    self.timer_start[s] = dt.datetime.now()
 
             always_actions = ['n-wall', 'e-wall', 'w-wall', 's-wall', 'help']
 
             possible_actions = ['stay']
 
             for component in self.components:
-                if self.state[p] == component:
+                if self.state[s] == component:
 
                     possible_actions += self.components[component].actions_to_state.keys()   \
-                                    + self.components[component].actions_to_inventory.keys()  \
-                                    + self.components[component].actions_to_event.keys()
+                                    + self.components[component].actions_to_inventory.keys()
 
             possible_actions += always_actions
 
@@ -417,71 +447,88 @@ class Game:
 
             ### Decide action
             if DEBUG:
-                self.action[p] = raw_input('next action for player{}: '.format(p+1))
+                self.action[s] = raw_input('next action for screen {}: '.format(s+1)).lower()
             else:
-                self.action[p] = self.parse_twitch_chat_file(possible_actions)
+                self.parse_twitch_chat_file()
 
             # Turn help on or off
-            if self.action[p] == 'help on' or (self.action[p] == 'help' and self.help == False):
+            if self.action[s] == 'help on' or (self.action[s] == 'help' and self.help == False):
                 self.help = True
-            elif self.action[p] == 'help off' or (self.action[p] == 'help' and self.help == True):
+            elif self.action[s] == 'help off' or (self.action[s] == 'help' and self.help == True):
                 self.help = False
 
             ### Update state based on action
-            if self.action[p] in possible_actions:
-                for component in self.components:
-                    if self.state[p] == component:
-                        if self.action[p] in self.components[component].actions_to_state: # change of state
-                            self.state[p] = self.components[component].actions_to_state[self.action[p]]
-                            print('moved to: {}'.format(self.state[p]))
+            for component in self.components:
+                if self.state[s] == component:
+
+                    if self.action[s] in self.components[component].actions_to_state and self.action[s] in possible_actions: # change of state (moving the entire screen)
+                        self.state[s] = self.components[component].actions_to_state[self.action[s]]
+                        print('moved to: {}'.format(self.state[s]))
+                        break
+
+                    elif not self.components[component].powered: # check if component is powered
+                        if 'not powered' not in self.journal[-1]:
+                            self.jot('{} is not powered.'.format(component))
+                        break
+
+                    elif self.action[s] in self.components[component].actions_to_inventory: # change of inventory (adding something to inventory)
+                        if self.components[component].actions_to_inventory[self.action[s]] not in self.inventory: # add only if you don't already have it
+                            self.inventory.append(self.components[component].actions_to_inventory[self.action[s]])
+                            self.jot('You got something in your inventory.')
                             break
-                        elif self.action[p] in self.components[component].actions_to_inventory: # change of inventory
-                            if self.components[component].actions_to_inventory[self.action[p]] not in self.inventory: # add only if you don't already have it
-                                self.inventory.append(self.components[component].actions_to_inventory[self.action[p]])
-                                self.center_message = ['You got something in your inventory.', (150, 250), datetime.datetime.now(), datetime.timedelta(0,5,0)]
-                                break
-                        elif self.action[p] in self.components[component].actions_to_event: # other change
-                            # action to event, complete
-                            if self.components[component].actions_to_event[self.action[p]] == 'complete':
-                                self.activate_next_puzzle(component)
-                            # blockpush
-                            if self.state[p] == 'blockpush':
-                                if self.components[component].actions_to_event[self.action[p]] == 'block-up' and self.blockpush_block[0] > 0:
-                                    self.blockpush_block[0] -= 1
-                                if self.components[component].actions_to_event[self.action[p]] == 'block-down' and self.blockpush_block[0] < 3:
-                                    self.blockpush_block[0] += 1
-                                if self.components[component].actions_to_event[self.action[p]] == 'block-right' and self.blockpush_block[1] < 3:
-                                    self.blockpush_block[1] += 1
-                                if self.components[component].actions_to_event[self.action[p]] == 'block-left' and self.blockpush_block[1] > 0:
-                                    self.blockpush_block[1] -= 1
-                                if self.blockpush_block == self.blockpush_end:
-                                    self.activate_next_puzzle('blockpush')
-                                if self.blockpush_grid[self.blockpush_block[0], self.blockpush_block[1]] == 1:
-                                    self.setup_blockpush()
-                            if self.state[p] == 'hangman':
-                                if self.action[p].isalpha():
-                                    next_guess = [self.action[p] if self.hangman_phrase[i] == self.action[p] else c for i, c in enumerate(self.hangman_guess)]
-                                    if next_guess == self.hangman_guess:
-                                        self.hangmanstate += 1
-                                    else:
-                                        self.hangman_guess = next_guess
-                                    if all([x != '_' for x in self.hangman_guess]):
-                                        print('win')
-                                        self.activate_next_puzzle('hangman')
-                                    if self.hangmanstate > 5:
-                                        print('lose')
-                                        self.setup_hangman()
-                                    print(self.hangman_guess)
 
-                        else:
-                            pass
+                    elif self.state[s] == 'family' and self.action[s] in self.correct_family_order:
+                        self.activate_next_puzzle('family')
+                        break
 
-            if self.state[p] == 'outside':
+                    elif self.state[s] == 'blockpush':
+                        if self.action[s] in ['up', 'u'] and self.blockpush_block[0] > 0:
+                            self.blockpush_block[0] -= 1
+                        if self.action[s] in ['down', 'd'] and self.blockpush_block[0] < 3:
+                            self.blockpush_block[0] += 1
+                        if self.action[s] in ['right', 'r'] and self.blockpush_block[1] < 3:
+                            self.blockpush_block[1] += 1
+                        if self.action[s] in ['left', 'l'] and self.blockpush_block[1] > 0:
+                            self.blockpush_block[1] -= 1
+                        if self.blockpush_block == self.blockpush_end:
+                            self.activate_next_puzzle('blockpush')
+                        if self.blockpush_grid[self.blockpush_block[0], self.blockpush_block[1]] == 1:
+                            self.setup_blockpush()
+                        break
+
+                    elif self.state[s] == 'hangman':
+                        if self.action[s].isalpha() and len(self.action[s]) == 1:
+                            next_guess = [self.action[s] if self.hangman_phrase[i] == self.action[s] else c for i, c in enumerate(self.hangman_guess)]
+                            if self.action[s] in self.hangman_guess:
+                                self.jot('You already guessed {}.'.format(self.action[s]))
+                            elif next_guess == self.hangman_guess:
+                                self.jot('{} is not in the phrase.'.format(self.action[s]))
+                                self.hangmanstate += 1
+                            else:
+                                self.jot('{} is in the phrase!'.format(self.action[s]))
+                                self.hangman_guess = next_guess
+                            if all([x != '_' for x in self.hangman_guess]):
+                                self.activate_next_puzzle('hangman')
+                            if self.hangmanstate > 8:
+                                self.setup_hangman()
+                                self.jot('Hangman is resetting!')
+                        break
+
+                    elif self.state[s] == 'riddler':
+                        if self.action[s] == self.riddler_answer:
+                            self.activate_next_puzzle('riddler')
+                        break
+
+                    else:
+                        pass
+
+            if self.state[s] == 'outside':
+                self.jot('{}: You are free!')
                 self.win = True
 
-            self.p += 1
-            if self.p >= len(self.state):
-                self.p = 0
+            self.s += 1
+            if self.s >= len(self.state):
+                self.s = 0
 
         if self.one_off:
             self.one_off = False
@@ -491,10 +538,22 @@ class Game:
 
     def activate_next_puzzle(self, component):
 
-        print('activating {}'.format(self.components_order[self.components_order.index(component) + 1]))
-        self.center_message = ['You hear the sound of something activating.', (150, 250), datetime.datetime.now(), datetime.timedelta(0,5,0)]
-        self.components[self.components_order[self.components_order.index(component) + 1]].powered = True
-        self.components[self.components_order[self.components_order.index(component) + 1]].visible = True
+        next_component = self.components_order[self.components_order.index(component) + 1]
+        self.new_component_glow = [next_component, dt.datetime.now() + dt.timedelta(seconds = 20)]
+
+        print('activating', component, self.bridges, self.components_order.index(component) + 1, self.components_order[self.components_order.index(component) + 1])
+
+        if self.bridges[self.components_order.index(component)] == 'uncover':
+            self.components[self.components_order[self.components_order.index(component) + 1]].visible = True
+            self.jot('You hear the sound of {} appearing magically out of thin air.'.format(next_component))
+        if self.bridges[self.components_order.index(component)] == 'power':
+            self.components[self.components_order[self.components_order.index(component) + 1]].powered = True
+            self.jot('You hear the sound of {} powering ON.'.format(next_component))
+
+
+    def jot(self, message):
+        if not self.journal[-1].endswith(message):
+            self.journal.append('{}: {}'.format(dt.datetime.now(), message))
 
 
 # --------------------------------------------------------------------------------------------------------- DRAW
@@ -503,18 +562,18 @@ class Game:
 
         try:
 
-            for p in range(len(self.state)): # iterate over players
+            for s in range(len(self.state)): # iterate over players
 
                 self.screen.blit(self.background, (self.p_offset[0], self.p_offset[1]))
 
                 # offset two screens
                 self.p_offset = [0, 0]
-                if p == 1:
+                if s == 1:
                     self.p_offset = [910, 0]
 
-                if 'wall' in self.state[p]:
-                    self.background = pygame.image.load('pics/{}.png'.format(self.state[p]))
-                    layers = self.walls[self.state[p]]
+                if 'wall' in self.state[s]:
+                    self.background = pygame.image.load('pics/{}.png'.format(self.state[s]))
+                    layers = self.walls[self.state[s]]
                     for i, layer in enumerate(layers): # starting in the back
                         # i is [0,1]
                         for j, spot in enumerate(layer):
@@ -536,52 +595,29 @@ class Game:
                                         horz_plac = 220 * (j+1)
                                     horz_plac += self.components[component].image_placement[0]
                                     vert_plac -= self.components[component].image_placement[1]
+                                    if self.new_component_glow[0] == spot and self.new_component_glow[1] - dt.datetime.now() > dt.timedelta(seconds=0):
+                                        self.background.blit(pygame.image.load('pics/glow.png'), (horz_plac, vert_plac))
                                     self.background.blit(c_image, (horz_plac, vert_plac))
                                     if self.help:
-                                        self.draw_message(component, (horz_plac + self.p_offset[0], vert_plac + self.p_offset[1]))
+                                        self.draw_message(component, (horz_plac + self.p_offset[0], vert_plac + self.p_offset[1]), preset = 'help')
 
-                elif self.state[p] == 'cchest':
+
+                elif self.state[s] == 'cchest':
                     self.background = pygame.image.load('pics/cchest-full.png')
                     for i, letter in enumerate(self.chest_text):
                         char = pygame.image.load('pics/letter-{}-medium.png'.format(letter))
                         self.background.blit(char, (240.5 + i * 88, 125))
 
-                elif self.state[p] == 'cpainting':
+                elif self.state[s] == 'cpainting':
                     self.background = pygame.image.load('pics/cpainting-full.png')
                     quote = ''.join(string.lower(self.painting_cipher_text).split('-')[:-1])
-                    quote_by = string.lower(self.painting_text).split('-')[-1]
-                    for i, letter in enumerate(quote): # this needs to be more complicated for
-                        if letter.isalpha():
-                            char = pygame.image.load('pics/letter-{}-medium.png'.format(letter))
-                        elif letter == '.':
-                            char = pygame.image.load('pics/period-medium.png')
-                        elif letter == ',':
-                            char = pygame.image.load('pics/comma-medium.png')
-                        elif letter == '\'':
-                            char = pygame.image.load('pics/apostrophe-medium.png')
-                        elif letter == '-':
-                            char = pygame.image.load('pics/hyphen-medium.png')
-                        elif letter == '\"':
-                            char = pygame.image.load('pics/quote-medium.png')
-                        else:
-                            char = 'none'
-                        if char != 'none':
-                            char = pygame.transform.scale(char, (40,40))
-                            self.background.blit(char, (190 + i % 12 * 45, 80 + (i / 12) * 45))
-                        for i, letter in enumerate(quote_by): # this needs to be more complicated for
-                            if letter.isalpha():
-                                char = pygame.image.load('pics/letter-{}-medium.png'.format(letter))
-                            elif letter == '.':
-                                char = pygame.image.load('pics/period-medium.png')
-                            elif letter == '-':
-                                char = pygame.image.load('pics/hyphen-medium.png')
-                            else:
-                                char = 'none'
-                            if char != 'none':
-                                char = pygame.transform.scale(char, (40,40))
-                                self.background.blit(char, (220 + i * 45, 400))
+                    quote_by = ' - ' + string.lower(self.painting_text).split('-')[-1][:-1]
+                    rows = textwrap.TextWrapper(width = 30).wrap(text = quote)
+                    for i, row in enumerate(rows):
+                        self.background.blit(pygame.font.SysFont(FONT, FONTSIZE + 20).render(row, True, (0,0,0), (255,255,255)), (190, 80 + 50 * i))
+                    self.background.blit(pygame.font.SysFont(FONT, FONTSIZE + 15).render(quote_by, True, (0,0,0), (255,255,255)), (420, 400))
 
-                elif self.state[p] == 'simon-says':
+                elif self.state[s] == 'simon-says':
                     self.background = pygame.image.load('pics/simon-says-full.png')
                     self.screen.blit(self.background, (0,0))
                     for color in self.simon_says_pattern:
@@ -590,7 +626,7 @@ class Game:
                         time.sleep(0.8)
                         self.background = pygame.image.load('pics/simon-says-full.png')
 
-                elif self.state[p] == 'amidakuji':
+                elif self.state[s] == 'amidakuji':
                     self.background = pygame.image.load('pics/amidakuji-full-{}.png'.format(self.amidakuji_choice))
                     for i, amidakuji_number in enumerate(self.amidakuji_numbers_order):
                         number = pygame.image.load('pics/number-{}-medium.png'.format(amidakuji_number))
@@ -599,21 +635,22 @@ class Game:
                         color = pygame.image.load('pics/{}-medium.png'.format(amidakuji_color))
                         self.background.blit(color, (111 + i * 128, 430))
 
-                elif self.state[p] == 'family':
+                elif self.state[s] == 'family':
                     self.background = pygame.image.load('pics/family-full.png')
-                    self.draw_message('In order of being the best, enter the names of the family!', (140 + self.p_offset[0], 100 + self.p_offset[1]))
-                    self.draw_message('For example: "daddy mommy lil-joe meghan carter-III bob-the-fish"', (140 + self.p_offset[0], 130 + self.p_offset[1]))
+                    self.draw_message('In order of being the best, enter the names of the family!', (140 + self.p_offset[0], 100 + self.p_offset[1]), preset = 'help')
+                    self.draw_message('For example: "daddy mommy lil-joe janice carter-III bob-the-fish"', (140 + self.p_offset[0], 120 + self.p_offset[1]), preset = 'help')
+                    self.draw_message('Or: "d m l j c b"', (140 + self.p_offset[0], 140 + self.p_offset[1]), preset = 'help')
                     for i, member in enumerate(self.family_members_order):
                         member_to_draw = pygame.image.load('pics/{}.png'.format(member))
                         self.background.blit(member_to_draw, (111 + i * 108, 230))
-                        member_dict = {'daddy':[124, 298, 'dot'], 'mommy':[127, 231, 'bow'], 'lil-joe':[151, 310, 'dot'], 'meghan':[124, 266, 'bow'],
+                        member_dict = {'daddy':[124, 298, 'dot'], 'mommy':[127, 231, 'bow'], 'lil-joe':[151, 310, 'dot'], 'janice':[124, 266, 'bow'],
                                         'carter-iii':[142, 345, 'collar'], 'skip':[108, 229, 'hat'], 'bob-the-fish':[141, 333, 'fish']}
                         article = pygame.image.load('pics/{}-{}.png'.format(member_dict[member][2], self.family_members_color_order[member]))
                         self.background.blit(article, (member_dict[member][0] + i * 108, member_dict[member][1]))
                         if self.help:
-                            self.draw_message(member, (111 + i * 108 + self.p_offset[0], 190 + self.p_offset[1]))
+                            self.draw_message(member, (111 + i * 108 + self.p_offset[0], 190 + self.p_offset[1]), preset = 'help')
 
-                elif self.state[p] == 'blockpush':
+                elif self.state[s] == 'blockpush':
                     self.background = pygame.image.load('pics/blockpush-full.png')
                     block = pygame.image.load('pics/blockpush-block.png')
                     x = pygame.image.load('pics/blockpush-x.png')
@@ -629,49 +666,83 @@ class Game:
                                 self.background.blit(end, (205 + j*115, 25 + i*115))
                             if i == self.blockpush_block[0] and j == self.blockpush_block[1]:
                                 self.background.blit(block, (205 + j*115, 25 + i*115))
+                    if self.help:
+                        self.draw_message('up, down, left, right', (200, 500), preset = 'help')
 
-                elif self.state[p] == 'hangman':
+                elif self.state[s] == 'hangman':
                     self.background = pygame.image.load('pics/hangman-full.png')
+                    if self.hangmanstate > 0:
+                        self.background.blit(pygame.image.load('pics/hangman-head.png'), (340, 65))
+                    if self.hangmanstate > 1:
+                        self.background.blit(pygame.image.load('pics/hangman-body.png'), (340, 125))
+                    if self.hangmanstate > 2:
+                        self.background.blit(pygame.image.load('pics/hangman-right-leg.png'), (320, 195))
+                    if self.hangmanstate > 3:
+                        self.background.blit(pygame.image.load('pics/hangman-left-leg.png'), (370, 195))
+                    if self.hangmanstate > 4:
+                        self.background.blit(pygame.image.load('pics/hangman-right-arm.png'), (310, 95))
+                    if self.hangmanstate > 5:
+                        self.background.blit(pygame.image.load('pics/hangman-left-arm.png'), (360, 95))
+                    if self.hangmanstate > 6:
+                        self.background.blit(pygame.image.load('pics/hangman-eye.png'), (347, 75))
+                    if self.hangmanstate > 7:
+                        self.background.blit(pygame.image.load('pics/hangman-eye.png'), (352, 75))
+                    if self.hangmanstate > 8:
+                        self.background.blit(pygame.image.load('pics/hangman-frown.png'), (340, 75))
+                    h_row = 0 # need to add row wrapping on words
                     for i, c in enumerate(self.hangman_guess):
                         if c.isalpha():
                             char = pygame.image.load('pics/letter-{}-medium.png'.format(c))
-                            self.background.blit(char, (220 + i * 45, 400))
+                            self.background.blit(char, (70 + i * 45, 400))
                         elif c == '_':
                             char = pygame.image.load('pics/underscore-medium.png')
-                            self.background.blit(char, (220 + i * 45, 400))
+                            self.background.blit(char, (70 + i * 45, 400))
 
+                elif self.state[s] == 'riddler':
+                    self.background = pygame.image.load('pics/riddler-full.png')
+                    rows = textwrap.TextWrapper(width = 30).wrap(text = self.riddler_riddle)
+                    for i, row in enumerate(rows):
+                        self.background.blit(pygame.font.SysFont(FONT, FONTSIZE + 10).render(row, True, (0,0,0), (255,255,255)), (240, 100 + 50 * i))
 
                 else:
-                    self.background = pygame.image.load('pics/{}-full.png'.format(self.state[p]))
+                    self.background = pygame.image.load('pics/{}-full.png'.format(self.state[s]))
 
-
-                # draw center message if applicable
-                if self.center_message[3].seconds > 0:
-                    if datetime.datetime.now() - self.center_message[2] > self.center_message[3]:
-                        self.center_message[3] = datetime.timedelta(0,0,0)
-                    self.draw_message(self.center_message[0], self.center_message[1], font_size = 38, text_color = (255, 255, 255))
 
                 # other help items
-                if self.help and 'wall' in self.state[p]:
-                    self.draw_message('Left', (60 + self.p_offset[0], 450 + self.p_offset[1]))
-                    self.draw_message('Right', (800 + self.p_offset[0], 450 + self.p_offset[1]))
+                if self.help and 'wall' in self.state[s]:
+                    self.draw_message('Left', (60 + self.p_offset[0], 450 + self.p_offset[1]), preset = 'help')
+                    self.draw_message('Right', (800 + self.p_offset[0], 450 + self.p_offset[1]), preset = 'help')
+
+                # bottom
+                self.blackbottom = pygame.image.load('pics/clean-bottom.png')
+                self.screen.blit(self.blackbottom, (0, 503))
+                if not DEBUG:
+                    self.screen.blit(self.blackbottom, (890, 503))
+
 
             # draw timer and actions/votes
+            for s in range(len(self.state)):
 
-            if DEBUG:
-                pass
-            else:
-                if (datetime.datetime.now() - self.timer_start).seconds < DECISIONTIME - 7:
-                    self.draw_message('Timer: {}'.format(DECISIONTIME - 7 - (datetime.datetime.now() - self.timer_start).seconds), (50, 550))
-                else:
-                    self.draw_message('Hold on until next round to vote!   ({})'.format(DECISIONTIME - (datetime.datetime.now() - self.timer_start).seconds), (50, 550))
-                self.draw_message('Last votes were: {}'.format(self.visible_votes), (50, 580))
+                # offset two screens
+                self.p_offset = [0, 0]
+                if s == 1:
+                    self.p_offset = [910, 0]
 
-            #self.blackbottom = pygame.image.load('pics/black-bottom.png')
-            #self.screen.blit(self.blackbottom, (0, 503))
+                if not DEBUG:
+                    if (dt.datetime.now() - self.timer_start[s]).seconds < DECISIONTIME - 7:
+                        self.draw_message('Vote! {}s'.format(DECISIONTIME - 7 - (dt.datetime.now() - self.timer_start[s]).seconds), (20 + self.p_offset[0], 20 + self.p_offset[1]), text_color = (0,0,0))
+                    else:
+                        self.draw_message('Wait! {}s'.format(DECISIONTIME - (dt.datetime.now() - self.timer_start[s]).seconds), (20 + self.p_offset[0], 20 + self.p_offset[1]), text_color = (0,0,0))
+                    self.draw_message('Last votes were: {}'.format(self.visible_votes), (50, 580))
+
+            # draw journal (last entry)
+            rows = textwrap.TextWrapper(width = 60).wrap(text = ''.join(self.journal[-1].split(':')[3:])) # remove timestamp and wrap
+            self.draw_message('Last journal entry:', (30, 520), preset = 'bottom')
+            for i, row in enumerate(rows):
+                self.draw_message(row, (250, 520 + 30 * i), preset = 'bottom')
 
             # draw inventory
-            self.draw_message('Inventory: {}'.format(self.inventory), (50, 630))
+            self.draw_message('Inventory: {}'.format(self.inventory), (30, 600), preset = 'bottom')
 
             pygame.display.update()
             self.clock.tick(self.fps)
@@ -680,45 +751,68 @@ class Game:
         #except Exception:
             pass
 
-    def draw_message(self, message, coord = (100, 100), font = 'blacksword.ttf', font_size = 28, text_color = (160, 190, 255), background_color = (  0,   0,   0)):
-        self.screen.blit(pygame.font.SysFont(font, font_size).render(message, True, text_color, background_color), coord)
+    # blacksword.tff
 
+    def draw_message(self, message, coord = (100, 100), preset = None, font = FONT, font_size = FONTSIZE, text_color = (160, 190, 255), background_color = None):
+        if preset == 'help':
+            background_color = (0, 0, 0)
+            text_color = (255, 255, 255)
+        if preset == 'bottom':
+            background_color = None
+        self.screen.blit(pygame.font.SysFont(font, font_size).render(message, True, text_color, background_color), coord)
 
 
 # ------------------------------------------------------------------------------------------------------------------- TWITCH
 
-    def parse_twitch_chat_file(self, possible_actions):
+    def create_vote_timing_commands(self):
+        f = open('VTC.txt', 'w')
+        for i, s in enumerate(self.num_players):
+            pass
 
-        if os.path.isfile('messages.txt'):
+    def parse_twitch_chat_file(self):
 
-            with open('messages.txt') as f:
-                contents = f.read().split('\n')
+        for s, f in enumerate(['s1_messages.txt', 's2_messages.txt']):
 
-            self.twitch_timer = contents[0]
-            self.timer_start = datetime.datetime.strptime(self.twitch_timer, '%Y-%m-%d %H:%M:%S.%f')
+            if os.path.isfile(f):
 
-            self.votes = {n:0 for n in possible_actions}
-            self.visible_votes = {}
+                with open(f) as fn:
+                    contents = fn.read().split('\n')
+                os.remove(f)
 
-            for message in contents[1:]:
-                if message == '':
-                    pass
-                elif message not in self.visible_votes:
-                    self.visible_votes[message] = 1
-                else:
-                    self.visible_votes[message] += 1
-                if message in possible_actions:
-                    self.votes[message] += 1
+                ready_time = contents[0] # need to format datetime to read
 
-            if all([self.votes[x] == 0 for x in self.votes]):
-                self.votes['stay'] += 1
+                # don't do anything until the timestamp expires
+                if dt.datetime.now() - ready_time > dt.timedelta(seconds=0):
 
-            mv = max(self.votes.values())
-            action = random.choice([k for (k, v) in self.votes.items() if v == mv])
+                    # reset votes for this screen
+                    self.votes[s] = []
 
-            os.remove('messages.txt')
+                    # partition content into messages and users, might want to use users later
+                    for content in contents[1:]: # user:message, user2:message2, etc.
+                        users = [x.split[':'][0] for x in content]
+                        messages = [''.join(x.split[':'][1:]) for x in content]
 
-            return action
+                    # do votes
+                    for i, message_group in enumerate(messages_by_screen):
+                        for message in message_group:
+                            if message == '':
+                                pass
+                            elif message not in self.votes[s]:
+                                self.votes[s][message] = 1
+                            else:
+                                self.votes[s][message] += 1
+
+                    # default action is to stay if there are no votes
+                    if all([self.votes[s][v] == 0 for v in self.votes]):
+                        self.votes['stay'] += 1
+
+                    # choose max vote per screen
+                    mv = max(self.votes[s].values())
+                    self.action = random.choice([k for (k, v) in self.votes[s].items() if v == mv])
+
+            else: # if file isn't there, don't do anything
+                self.action = 'stay'
+
 
 
 
