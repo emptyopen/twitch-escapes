@@ -399,7 +399,7 @@ class Game:
         self.map_components()
         self.place_components()
         if not DEBUG:
-            self.create_vote_timing_commands()
+            self.create_basetime()
 
         while True: # main game loop
 
@@ -419,14 +419,9 @@ class Game:
 
         if self.one_off:
 
-            s = self.s
-
-            if not DEBUG:
-                if dt.datetime.now() - self.timer_start[s] > dt.timedelta(0, DECISIONTIME, 0):
-                    self.timer_start[s] = dt.datetime.now()
+            s = self.s # shorten for convenience
 
             always_actions = ['n-wall', 'e-wall', 'w-wall', 's-wall', 'help']
-
             possible_actions = ['stay']
 
             for component in self.components:
@@ -764,10 +759,9 @@ class Game:
 
 # ------------------------------------------------------------------------------------------------------------------- TWITCH
 
-    def create_vote_timing_commands(self):
-        f = open('VTC.txt', 'w')
-        for i, s in enumerate(self.num_players):
-            pass
+    def create_basetime(self):
+        with open('basetime.txt', 'w') as f:
+            f.write(str(BASETIME))
 
     def parse_twitch_chat_file(self):
 
@@ -781,34 +775,30 @@ class Game:
 
                 ready_time = contents[0] # need to format datetime to read
 
-                # don't do anything until the timestamp expires
-                if dt.datetime.now() - ready_time > dt.timedelta(seconds=0):
+                # reset votes for this screen
+                self.votes[s] = []
 
-                    # reset votes for this screen
-                    self.votes[s] = []
+                # partition content into messages and users, might want to use users later
+                for content in contents[1:]: # user:message, user2:message2, etc.
+                    users = [x.split[':'][0] for x in content]
+                    messages = [''.join(x.split[':'][1:]) for x in content]
 
-                    # partition content into messages and users, might want to use users later
-                    for content in contents[1:]: # user:message, user2:message2, etc.
-                        users = [x.split[':'][0] for x in content]
-                        messages = [''.join(x.split[':'][1:]) for x in content]
+                # do votes
+                for message in messages:
+                    if message == '':
+                        pass
+                    elif message not in self.votes[s]:
+                        self.votes[s][message] = 1
+                    else:
+                        self.votes[s][message] += 1
 
-                    # do votes
-                    for i, message_group in enumerate(messages_by_screen):
-                        for message in message_group:
-                            if message == '':
-                                pass
-                            elif message not in self.votes[s]:
-                                self.votes[s][message] = 1
-                            else:
-                                self.votes[s][message] += 1
+                # default action is to stay if there are no votes
+                if all([self.votes[s][v] == 0 for v in self.votes]):
+                    self.votes['stay'] += 1
 
-                    # default action is to stay if there are no votes
-                    if all([self.votes[s][v] == 0 for v in self.votes]):
-                        self.votes['stay'] += 1
-
-                    # choose max vote per screen
-                    mv = max(self.votes[s].values())
-                    self.action = random.choice([k for (k, v) in self.votes[s].items() if v == mv])
+                # choose max vote per screen
+                mv = max(self.votes[s].values())
+                self.action = random.choice([k for (k, v) in self.votes[s].items() if v == mv])
 
             else: # if file isn't there, don't do anything
                 self.action = 'stay'
