@@ -101,12 +101,11 @@ class Game:
             self.num_players = [1, 2] # extremely powerful
             self.state = ['n-wall', 's-wall'] # THESE 3 NEED TO BE THE SAME SIZE
             self.action = ['stay', 'stay']
-        #self.timer_start = [dt.datetime.now(), dt.datetime.now() - dt.timedelta(DECISIONTIME / 2)]
-        self.timer_start = [dt.datetime.now(), dt.datetime.now() - dt.timedelta(seconds = 5)]
         self.win = False
         self.help = False
         self.center_message = ['', (0,0), dt.datetime.now(), dt.timedelta(0,0,0)]
         self.votes = {s:{} for s in self.num_players}
+        self.ready_time = [dt.datetime.now() for s in self.num_players]
         self.inventory = []
         self.journal = ['Welcome to the Basement!']
         self.new_component_glow = [None, dt.datetime.now() + dt.timedelta(seconds = 0)]
@@ -722,13 +721,14 @@ class Game:
                 self.p_offset = [0, 0]
                 if s == 1:
                     self.p_offset = [910, 0]
-
+                '''
                 if not DEBUG:
                     if (dt.datetime.now() - self.timer_start[s]).seconds < DECISIONTIME - 7:
                         self.draw_message('Vote! {}s'.format(DECISIONTIME - 7 - (dt.datetime.now() - self.timer_start[s]).seconds), (20 + self.p_offset[0], 20 + self.p_offset[1]), text_color = (0,0,0))
                     else:
                         self.draw_message('Wait! {}s'.format(DECISIONTIME - (dt.datetime.now() - self.timer_start[s]).seconds), (20 + self.p_offset[0], 20 + self.p_offset[1]), text_color = (0,0,0))
                     self.draw_message('Last votes were: {}'.format(self.visible_votes), (50, 580))
+                '''
 
             # draw journal (last entry)
             rows = textwrap.TextWrapper(width = 60).wrap(text = ''.join(self.journal[-1].split(':')[3:])) # remove timestamp and wrap
@@ -738,6 +738,10 @@ class Game:
 
             # draw inventory
             self.draw_message('Inventory: {}'.format(self.inventory), (30, 600), preset = 'bottom')
+
+            # draw votes/actions
+            self.draw_message('now: {}'.format(dt.datetime.now()), (30, 660), preset = 'bottom')
+            self.draw_message('timers: {}'.format(self.ready_time), (30, 680), preset = 'bottom')
 
             pygame.display.update()
             self.clock.tick(self.fps)
@@ -760,7 +764,7 @@ class Game:
 # ------------------------------------------------------------------------------------------------------------------- TWITCH
 
     def create_basetime(self):
-        with open('basetime.txt', 'w') as f:
+        with open('vtc.txt', 'w') as f:
             f.write(str(BASETIME))
 
     def parse_twitch_chat_file(self):
@@ -773,15 +777,19 @@ class Game:
                     contents = fn.read().split('\n')
                 os.remove(f)
 
-                ready_time = contents[0] # need to format datetime to read
+                print('contents: {}'.format(contents))
+
+                self.ready_time[s] = dt.datetime.strptime(contents[0], '%Y-%m-%d %H:%M:%S.%f')
 
                 # reset votes for this screen
-                self.votes[s] = []
+                self.votes[s] = {}
 
                 # partition content into messages and users, might want to use users later
                 for content in contents[1:]: # user:message, user2:message2, etc.
-                    users = [x.split[':'][0] for x in content]
-                    messages = [''.join(x.split[':'][1:]) for x in content]
+                    users = [x.split(':::')[0] for x in content]
+                    messages = [':::'.join(x.split(':::')[1:]) for x in content]
+
+                print('messages: {}'.format(messages))
 
                 # do votes
                 for message in messages:
@@ -793,8 +801,11 @@ class Game:
                         self.votes[s][message] += 1
 
                 # default action is to stay if there are no votes
-                if all([self.votes[s][v] == 0 for v in self.votes]):
-                    self.votes['stay'] += 1
+                if all([self.votes[s][v] == 0 for v in self.votes[s]]):
+                    if 'stay' in self.votes[s]:
+                        self.votes[s]['stay'] += 1
+                    else:
+                        self.votes[s]['stay'] = 1
 
                 # choose max vote per screen
                 mv = max(self.votes[s].values())
