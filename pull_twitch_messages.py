@@ -19,7 +19,7 @@ try:
     os.remove('vtc.txt')
 except:
     pass
-    
+
 while True: # this loop never ends until user CTRL+C
 
     # reset chat
@@ -33,6 +33,7 @@ while True: # this loop never ends until user CTRL+C
 
         with open('vtc.txt') as f:
             basetime = dt.datetime.strptime(f.read(), '%Y-%m-%d %H:%M:%S.%f')
+        os.remove('vtc.txt')
 
         # these checkpoints will be continuously reset to add 10 seconds each time
         c1 = basetime
@@ -43,11 +44,17 @@ while True: # this loop never ends until user CTRL+C
 
         while True:
 
+            if os.path.isfile('vtc.txt'): # if a new one pop ups, restart
+                with open('vtc.txt') as f:
+                    basetime = dt.datetime.strptime(f.read(), '%Y-%m-%d %H:%M:%S.%f')
+                os.remove('vtc.txt')
+                print('starting with new providing VTC')
+                c1 = basetime
+                c2 = basetime + dt.timedelta(seconds = 10)
+                cp = [c1, c2]
+            
             # add all messages to a running buffer (length 20s for now)
             # if current time hits a checkpoint, pack up all relevant messages and send it to file
-
-            if dt.datetime.now() - pull_twitch_messages_start_time > dt.timedelta(0,300,0):
-                break # reset the check for a new basetime every 5 min
 
             timeout = 1 #sec
             ready = select.select([s], [], [], timeout)

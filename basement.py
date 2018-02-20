@@ -1,7 +1,7 @@
 #
 # written by Matt Takao
 # started 2017-12-01
-# last major update 2017-12-15
+# last major update 2018-02-19
 #
 
 import random
@@ -740,8 +740,20 @@ class Game:
             self.draw_message('Inventory: {}'.format(self.inventory), (30, 600), preset = 'bottom')
 
             # draw votes/actions
+            if not DEBUG:
+                s1_seconds = (self.ready_time[0] - dt.datetime.now()).seconds - STREAM_DELAY_OFFSET
+                s2_seconds = (self.ready_time[1] - dt.datetime.now()).seconds - STREAM_DELAY_OFFSET
+                banner = pygame.image.load('pics/vote.png')
+                if 0 < s1_seconds < 10:
+                    self.draw_message('Vote! {}'.format(s1_seconds), (130, 80), preset = 'timer')
+                    self.screen.blit(banner, (0, 20))
+                    self.screen.blit(banner, (0, 474))
+                if 0 < s2_seconds < 10:
+                    self.draw_message('Vote! {}'.format(s2_seconds), (1030, 80), preset = 'timer')
+                    self.screen.blit(banner, (910, 20))
+                    self.screen.blit(banner, (910, 474))
+
             self.draw_message('now: {}'.format(dt.datetime.now()), (30, 660), preset = 'bottom')
-            self.draw_message('timers: {}'.format(self.ready_time), (30, 680), preset = 'bottom')
 
             pygame.display.update()
             self.clock.tick(self.fps)
@@ -756,8 +768,10 @@ class Game:
         if preset == 'help':
             background_color = (0, 0, 0)
             text_color = (255, 255, 255)
-        if preset == 'bottom':
+        elif preset == 'bottom':
             background_color = None
+        elif preset == 'timer':
+            text_color = (0,0,0)
         self.screen.blit(pygame.font.SysFont(font, font_size).render(message, True, text_color, background_color), coord)
 
 
@@ -785,11 +799,8 @@ class Game:
                 self.votes[s] = {}
 
                 # partition content into messages and users, might want to use users later
-                for content in contents[1:]: # user:message, user2:message2, etc.
-                    users = [x.split(':::')[0] for x in content]
-                    messages = [':::'.join(x.split(':::')[1:]) for x in content]
-
-                print('messages: {}'.format(messages))
+                users = [x.split(':::')[0] for x in contents[1:]]
+                messages = [':::'.join(x.split(':::')[1:]) for x in contents[1:]]
 
                 # do votes
                 for message in messages:
@@ -809,10 +820,12 @@ class Game:
 
                 # choose max vote per screen
                 mv = max(self.votes[s].values())
-                self.action = random.choice([k for (k, v) in self.votes[s].items() if v == mv])
+                self.action[s] = random.choice([k for (k, v) in self.votes[s].items() if v == mv])
+                print('actions: {}'.format(self.action))
 
             else: # if file isn't there, don't do anything
-                self.action = 'stay'
+                time.sleep(0.01)
+                self.action[s] = 'stay'
 
 
 
@@ -823,3 +836,15 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+# (890, 503) , 214 vert for black, 20 margin
+
+
+
+
+
+
+#

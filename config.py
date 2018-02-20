@@ -3,6 +3,7 @@ import os
 
 DEBUG = False
 
+STREAM_DELAY_OFFSET = 7
 
 FONT = 'aerxtablets'
 FONTSIZE = 28
