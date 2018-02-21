@@ -17,6 +17,8 @@ import textwrap
 
 from config import *
 
+os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (20,20)
+
 pygame.font.init()
 #print(sorted(pygame.font.get_fonts()))
 
@@ -84,12 +86,12 @@ class Game:
         self.fps = 60
         self.clock = pygame.time.Clock()
         if DEBUG:
-            self.screen = pygame.display.set_mode((890, 717))
+            self.screen = pygame.display.set_mode((1780, 820))  # (850, 400)
         else:
-            self.screen = pygame.display.set_mode((1800, 717))  # (890, 503) , 214 vert for black, 20 margin
+            self.screen = pygame.display.set_mode((1780, 1020))  # (850, 400)
         self.background = pygame.image.load('pics/n-wall.png')
         self.one_off = True # toggler that ensures screen updates after state update?
-        self.p_offset = [0, 0] # offset for multiple screens
+        self.p_offset = [30, 10] # offset for multiple screens
 
         # game state
         self.s = 0 # player state to display or update
@@ -98,16 +100,15 @@ class Game:
             self.state = ['n-wall']
             self.action = ['stay']
         else:
-            self.num_players = [1, 2] # extremely powerful
-            self.state = ['n-wall', 's-wall'] # THESE 3 NEED TO BE THE SAME SIZE
-            self.action = ['stay', 'stay']
+            self.num_players = [1, 2, 3, 4] # extremely powerful
+            self.state = ['n-wall', 'e-wall', 's-wall', 'w-wall'] # THESE 3 NEED TO BE THE SAME SIZE
+            self.action = ['stay', 'stay', 'stay', 'stay']
         self.win = False
         self.help = False
-        self.center_message = ['', (0,0), dt.datetime.now(), dt.timedelta(0,0,0)]
         self.votes = {s:{} for s in self.num_players}
         self.ready_time = [dt.datetime.now() for s in self.num_players]
         self.inventory = []
-        self.journal = ['Welcome to the Basement!']
+        self.journal = ['0:0:0: Welcome to the Basement!']
         self.new_component_glow = [None, dt.datetime.now() + dt.timedelta(seconds = 0)]
 
         # game initialization reqs
@@ -126,6 +127,7 @@ class Game:
                                 'e-wall': Component('East wall', [0, 0, 0], {'left':'n-wall', 'right':'s-wall'}, {}, [[], []]),
                                 's-wall': Component('South wall', [0, 0, 0], {'left':'e-wall', 'right':'w-wall'}, {}, [[], []]),
                                 'w-wall': Component('West wall', [0, 0, 0], {'left':'s-wall', 'right':'n-wall'}, {}, [[], []]),
+                                'journal': Component('The journal', [0, 0, 0], {}, {}, [[], []]),
                                 'trophycase': Component('A trophy case', [0, 0, 1], {}, {}, [['knowledge'], ['inventory']]),
                                 'door': Component('The exit door', [0, -33, 1], {'keypad':'keypad'}, {}, [[], []]),
                                 'keypad': Component('A keypad', [0, 0, 0], {'back': 'door', self.keypad_code: 'outside'}, {}, [['inventory', 'knowledge-keypadcode'], []]),
@@ -443,7 +445,7 @@ class Game:
             if DEBUG:
                 self.action[s] = raw_input('next action for screen {}: '.format(s+1)).lower()
             else:
-                self.parse_twitch_chat_file()
+                self.action[s] = self.parse_twitch_chat_file()
 
             # Turn help on or off
             if self.action[s] == 'help on' or (self.action[s] == 'help' and self.help == False):
@@ -451,70 +453,87 @@ class Game:
             elif self.action[s] == 'help off' or (self.action[s] == 'help' and self.help == True):
                 self.help = False
 
-            ### Update state based on action
-            for component in self.components:
-                if self.state[s] == component:
+            # moving in and out of journal
+            if self.action[s] == 'journal' and self.state[s] != 'journal': # consider journal only from wall?
+                self.previous_state = self.state[s]
+                self.state[s] = 'journal'
+                self.journal_page = 0
+            elif self.state[s] == 'journal':
+                if self.action[s] == 'left':
+                    pass
+                if self.action[s] == 'right':
+                    pass
+                if self.action[s] == 'back':
+                    self.state[s] = self.previous_state
 
-                    if self.action[s] in self.components[component].actions_to_state and self.action[s] in possible_actions: # change of state (moving the entire screen)
-                        self.state[s] = self.components[component].actions_to_state[self.action[s]]
-                        print('moved to: {}'.format(self.state[s]))
-                        break
+            else:
+                ### Update state based on action
+                for component in self.components:
+                    if self.state[s] == component:
 
-                    elif not self.components[component].powered: # check if component is powered
-                        if 'not powered' not in self.journal[-1]:
-                            self.jot('{} is not powered.'.format(component))
-                        break
-
-                    elif self.action[s] in self.components[component].actions_to_inventory: # change of inventory (adding something to inventory)
-                        if self.components[component].actions_to_inventory[self.action[s]] not in self.inventory: # add only if you don't already have it
-                            self.inventory.append(self.components[component].actions_to_inventory[self.action[s]])
-                            self.jot('You got something in your inventory.')
+                        # change of state (moving the entire screen)
+                        if self.action[s] in self.components[component].actions_to_state and self.action[s] in possible_actions:
+                            self.state[s] = self.components[component].actions_to_state[self.action[s]]
+                            print('moved to: {}'.format(self.state[s]))
                             break
 
-                    elif self.state[s] == 'family' and self.action[s] in self.correct_family_order:
-                        self.activate_next_puzzle('family')
-                        break
+                        # check if component is powered
+                        elif not self.components[component].powered:
+                            if 'not powered' not in self.journal[-1]:
+                                self.jot('{} is not powered.'.format(component))
+                            break
 
-                    elif self.state[s] == 'blockpush':
-                        if self.action[s] in ['up', 'u'] and self.blockpush_block[0] > 0:
-                            self.blockpush_block[0] -= 1
-                        if self.action[s] in ['down', 'd'] and self.blockpush_block[0] < 3:
-                            self.blockpush_block[0] += 1
-                        if self.action[s] in ['right', 'r'] and self.blockpush_block[1] < 3:
-                            self.blockpush_block[1] += 1
-                        if self.action[s] in ['left', 'l'] and self.blockpush_block[1] > 0:
-                            self.blockpush_block[1] -= 1
-                        if self.blockpush_block == self.blockpush_end:
-                            self.activate_next_puzzle('blockpush')
-                        if self.blockpush_grid[self.blockpush_block[0], self.blockpush_block[1]] == 1:
-                            self.setup_blockpush()
-                        break
+                        # change of inventory (adding something to inventory)
+                        elif self.action[s] in self.components[component].actions_to_inventory:
+                            if self.components[component].actions_to_inventory[self.action[s]] not in self.inventory: # add only if you don't already have it
+                                self.inventory.append(self.components[component].actions_to_inventory[self.action[s]])
+                                self.jot('You got something in your inventory.')
+                                break
 
-                    elif self.state[s] == 'hangman':
-                        if self.action[s].isalpha() and len(self.action[s]) == 1:
-                            next_guess = [self.action[s] if self.hangman_phrase[i] == self.action[s] else c for i, c in enumerate(self.hangman_guess)]
-                            if self.action[s] in self.hangman_guess:
-                                self.jot('You already guessed {}.'.format(self.action[s]))
-                            elif next_guess == self.hangman_guess:
-                                self.jot('{} is not in the phrase.'.format(self.action[s]))
-                                self.hangmanstate += 1
-                            else:
-                                self.jot('{} is in the phrase!'.format(self.action[s]))
-                                self.hangman_guess = next_guess
-                            if all([x != '_' for x in self.hangman_guess]):
-                                self.activate_next_puzzle('hangman')
-                            if self.hangmanstate > 8:
-                                self.setup_hangman()
-                                self.jot('Hangman is resetting!')
-                        break
+                        elif self.state[s] == 'family' and self.action[s] in self.correct_family_order:
+                            self.activate_next_puzzle('family')
+                            break
 
-                    elif self.state[s] == 'riddler':
-                        if self.action[s] == self.riddler_answer:
-                            self.activate_next_puzzle('riddler')
-                        break
+                        elif self.state[s] == 'blockpush':
+                            if self.action[s] in ['up', 'u'] and self.blockpush_block[0] > 0:
+                                self.blockpush_block[0] -= 1
+                            if self.action[s] in ['down', 'd'] and self.blockpush_block[0] < 3:
+                                self.blockpush_block[0] += 1
+                            if self.action[s] in ['right', 'r'] and self.blockpush_block[1] < 3:
+                                self.blockpush_block[1] += 1
+                            if self.action[s] in ['left', 'l'] and self.blockpush_block[1] > 0:
+                                self.blockpush_block[1] -= 1
+                            if self.blockpush_block == self.blockpush_end:
+                                self.activate_next_puzzle('blockpush')
+                            if self.blockpush_grid[self.blockpush_block[0], self.blockpush_block[1]] == 1:
+                                self.setup_blockpush()
+                            break
 
-                    else:
-                        pass
+                        elif self.state[s] == 'hangman':
+                            if self.action[s].isalpha() and len(self.action[s]) == 1:
+                                next_guess = [self.action[s] if self.hangman_phrase[i] == self.action[s] else c for i, c in enumerate(self.hangman_guess)]
+                                if self.action[s] in self.hangman_guess:
+                                    self.jot('You already guessed {}.'.format(self.action[s]))
+                                elif next_guess == self.hangman_guess:
+                                    self.jot('{} is not in the phrase.'.format(self.action[s]))
+                                    self.hangmanstate += 1
+                                else:
+                                    self.jot('{} is in the phrase!'.format(self.action[s]))
+                                    self.hangman_guess = next_guess
+                                if all([x != '_' for x in self.hangman_guess]):
+                                    self.activate_next_puzzle('hangman')
+                                if self.hangmanstate > 8:
+                                    self.setup_hangman()
+                                    self.jot('Hangman is resetting!')
+                            break
+
+                        elif self.state[s] == 'riddler':
+                            if self.action[s] == self.riddler_answer:
+                                self.activate_next_puzzle('riddler')
+                            break
+
+                        else:
+                            pass
 
             if self.state[s] == 'outside':
                 self.jot('{}: You are free!')
@@ -561,9 +580,14 @@ class Game:
                 self.screen.blit(self.background, (self.p_offset[0], self.p_offset[1]))
 
                 # offset two screens
-                self.p_offset = [0, 0]
+                if s == 0:
+                    self.p_offset = [30, 10]
                 if s == 1:
-                    self.p_offset = [910, 0]
+                    self.p_offset = [890, 10]
+                if s == 2:
+                    self.p_offset = [30, 560]
+                if s == 3:
+                    self.p_offset = [890, 560]
 
                 if 'wall' in self.state[s]:
                     self.background = pygame.image.load('pics/{}.png'.format(self.state[s]))
@@ -578,14 +602,14 @@ class Game:
                                     component = spot
                                     c_image = pygame.image.load('pics/{}.png'.format(component))
                                     c_image_offset = [c_image.get_width()/2, c_image.get_height()/2]
-                                    if i == 0:
-                                        vert_plac = 186
+                                    if i == 0: # in front
+                                        vert_plac = 136
                                         if j == 0:
                                             horz_plac = 324
                                         elif j == 1:
                                             horz_plac = 556
-                                    elif i == 1:
-                                        vert_plac = 312
+                                    elif i == 1: # in back
+                                        vert_plac = 252
                                         horz_plac = 220 * (j+1)
                                     horz_plac += self.components[component].image_placement[0]
                                     vert_plac -= self.components[component].image_placement[1]
@@ -595,6 +619,25 @@ class Game:
                                     if self.help:
                                         self.draw_message(component, (horz_plac + self.p_offset[0], vert_plac + self.p_offset[1]), preset = 'help')
 
+                elif self.state[s] == 'journal':
+                    self.background = pygame.image.load('pics/journal-full.png')
+                    journal_pages = [[]]
+                    cnt = 0
+                    for entry in self.journal: # create journal pages
+                        if cnt == 32:
+                            journal_pages.append([])
+                            cnt = 0
+                        journal_pages[-1].append(''.join(entry.split(':')[3:]))
+                        cnt += 1
+                    for i, row in enumerate(journal_pages[self.journal_page]):
+                        if len(row) > 35:
+                            text = ' '.join(row.split(' ')[:-1]) + '...'
+                        else:
+                            text = row
+                        if i <= 16:
+                            self.draw_message(text, (60, 30 + 21 * i), preset = 'journal')
+                        if i > 16:
+                            self.draw_message(text, (484, 30 + 21 * (i - 17)), preset = 'journal')
 
                 elif self.state[s] == 'cchest':
                     self.background = pygame.image.load('pics/cchest-full.png')
@@ -696,7 +739,7 @@ class Game:
                     self.background = pygame.image.load('pics/riddler-full.png')
                     rows = textwrap.TextWrapper(width = 30).wrap(text = self.riddler_riddle)
                     for i, row in enumerate(rows):
-                        self.background.blit(pygame.font.SysFont(FONT, FONTSIZE + 10).render(row, True, (0,0,0), (255,255,255)), (240, 100 + 50 * i))
+                        self.background.blit(pygame.font.SysFont(FONT, FONTSIZE + 10).render(row, True, (0,0,0), (255,255,255)), (200, 100 + 50 * i))
 
                 else:
                     self.background = pygame.image.load('pics/{}-full.png'.format(self.state[s]))
@@ -707,37 +750,19 @@ class Game:
                     self.draw_message('Left', (60 + self.p_offset[0], 450 + self.p_offset[1]), preset = 'help')
                     self.draw_message('Right', (800 + self.p_offset[0], 450 + self.p_offset[1]), preset = 'help')
 
-                # bottom
-                self.blackbottom = pygame.image.load('pics/clean-bottom.png')
-                self.screen.blit(self.blackbottom, (0, 503))
-                if not DEBUG:
-                    self.screen.blit(self.blackbottom, (890, 503))
+            # bottom
+            statusbar = pygame.image.load('pics/clean-bottom.png')
+            self.screen.blit(statusbar, (0, 420))
 
-
-            # draw timer and actions/votes
-            for s in range(len(self.state)):
-
-                # offset two screens
-                self.p_offset = [0, 0]
-                if s == 1:
-                    self.p_offset = [910, 0]
-                '''
-                if not DEBUG:
-                    if (dt.datetime.now() - self.timer_start[s]).seconds < DECISIONTIME - 7:
-                        self.draw_message('Vote! {}s'.format(DECISIONTIME - 7 - (dt.datetime.now() - self.timer_start[s]).seconds), (20 + self.p_offset[0], 20 + self.p_offset[1]), text_color = (0,0,0))
-                    else:
-                        self.draw_message('Wait! {}s'.format(DECISIONTIME - (dt.datetime.now() - self.timer_start[s]).seconds), (20 + self.p_offset[0], 20 + self.p_offset[1]), text_color = (0,0,0))
-                    self.draw_message('Last votes were: {}'.format(self.visible_votes), (50, 580))
-                '''
 
             # draw journal (last entry)
-            rows = textwrap.TextWrapper(width = 60).wrap(text = ''.join(self.journal[-1].split(':')[3:])) # remove timestamp and wrap
-            self.draw_message('Last journal entry:', (30, 520), preset = 'bottom')
+            rows = textwrap.TextWrapper(width = 50).wrap(text = ''.join(self.journal[-1].split(':')[3:])) # remove timestamp and wrap
+            self.draw_message('Last journal entry:', (40, 440), preset = 'bottom')
             for i, row in enumerate(rows):
-                self.draw_message(row, (250, 520 + 30 * i), preset = 'bottom')
+                self.draw_message(row, (70, 470 + 20 * i), preset = 'bottom')
 
             # draw inventory
-            self.draw_message('Inventory: {}'.format(self.inventory), (30, 600), preset = 'bottom')
+            self.draw_message('Inventory: {}'.format(self.inventory), (640, 440), preset = 'bottom')
 
             # draw votes/actions
             if not DEBUG:
@@ -746,14 +771,19 @@ class Game:
                 banner = pygame.image.load('pics/vote.png')
                 if 0 < s1_seconds < 10:
                     self.draw_message('Vote! {}'.format(s1_seconds), (130, 80), preset = 'timer')
-                    self.screen.blit(banner, (0, 20))
-                    self.screen.blit(banner, (0, 474))
+                    #self.screen.blit(banner, (0, 20))
+                    #self.screen.blit(banner, (0, 474))
                 if 0 < s2_seconds < 10:
                     self.draw_message('Vote! {}'.format(s2_seconds), (1030, 80), preset = 'timer')
-                    self.screen.blit(banner, (910, 20))
-                    self.screen.blit(banner, (910, 474))
+                    #self.screen.blit(banner, (910, 20))
+                    #self.screen.blit(banner, (910, 474))
 
-            self.draw_message('now: {}'.format(dt.datetime.now()), (30, 660), preset = 'bottom')
+            self.draw_message('now: {}'.format(dt.datetime.now()), (1230, 440), preset = 'status')
+            if not DEBUG:
+                self.draw_message('s1_ready: {}, s2_ready: {}'.format((self.ready_time[0] - dt.datetime.now()).seconds, \
+                                                    (self.ready_time[1] - dt.datetime.now()).seconds), (1230, 470), preset = 'status')
+                self.draw_message('s1: {}'.format(self.ready_time[0]), (1230, 500), preset = 'status')
+                self.draw_message('s2: {}'.format(self.ready_time[1]), (1230, 530), preset = 'status')
 
             pygame.display.update()
             self.clock.tick(self.fps)
@@ -764,15 +794,23 @@ class Game:
 
     # blacksword.tff
 
-    def draw_message(self, message, coord = (100, 100), preset = None, font = FONT, font_size = FONTSIZE, text_color = (160, 190, 255), background_color = None):
+    def draw_message(self, message, coord = (100, 100), preset = None, font = FONT, font_size = FONTSIZE, text_color = (160, 190, 255), background_color = None, alpha = 255):
+        message = message.upper()
+        if preset == 'journal':
+            text_color = (0, 0, 0)
+            font_size = FONTSIZE - 5
         if preset == 'help':
             background_color = (0, 0, 0)
             text_color = (255, 255, 255)
+            alpha = 200
+            message = ' {} '.format(message)
         elif preset == 'bottom':
             background_color = None
         elif preset == 'timer':
             text_color = (0,0,0)
-        self.screen.blit(pygame.font.SysFont(font, font_size).render(message, True, text_color, background_color), coord)
+        font_object = pygame.font.SysFont(font, font_size).render(message, True, text_color, background_color)
+        font_object.set_alpha(alpha)
+        self.screen.blit(font_object, coord)
 
 
 # ------------------------------------------------------------------------------------------------------------------- TWITCH
@@ -820,12 +858,11 @@ class Game:
 
                 # choose max vote per screen
                 mv = max(self.votes[s].values())
-                self.action[s] = random.choice([k for (k, v) in self.votes[s].items() if v == mv])
-                print('actions: {}'.format(self.action))
+                action = random.choice([k for (k, v) in self.votes[s].items() if v == mv])
+                return action
 
             else: # if file isn't there, don't do anything
-                time.sleep(0.01)
-                self.action[s] = 'stay'
+                return 'stay'
 
 
 

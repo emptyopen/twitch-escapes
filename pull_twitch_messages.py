@@ -22,13 +22,6 @@ except:
 
 while True: # this loop never ends until user CTRL+C
 
-    # reset chat
-    if dt.datetime.now() - pull_twitch_messages_start_time > dt.timedelta(0,300,0):
-        s = chat_connect.openSocket()
-        s.setblocking(0)
-        readbuffer = ""
-        pull_twitch_messages_start_time = dt.datetime.now()
-
     if os.path.isfile('vtc.txt'): # keep looking for vote timing command
 
         with open('vtc.txt') as f:
@@ -40,9 +33,18 @@ while True: # this loop never ends until user CTRL+C
         c2 = basetime + dt.timedelta(seconds = 10)
         cp = [c1, c2]
 
+        print()
+
         user_messages = [[], []]
 
         while True:
+
+            # reset chat
+            if dt.datetime.now() - pull_twitch_messages_start_time > dt.timedelta(0,300,0):
+                s = chat_connect.openSocket()
+                s.setblocking(0)
+                readbuffer = ""
+                pull_twitch_messages_start_time = dt.datetime.now()
 
             if os.path.isfile('vtc.txt'): # if a new one pop ups, restart
                 with open('vtc.txt') as f:
@@ -52,7 +54,7 @@ while True: # this loop never ends until user CTRL+C
                 c1 = basetime
                 c2 = basetime + dt.timedelta(seconds = 10)
                 cp = [c1, c2]
-            
+
             # add all messages to a running buffer (length 20s for now)
             # if current time hits a checkpoint, pack up all relevant messages and send it to file
 
@@ -101,10 +103,11 @@ while True: # this loop never ends until user CTRL+C
 
             for i, c in enumerate(cp): # check each checkpoint
 
-                if c - dt.datetime.now() < dt.timedelta(0):
+                if c - dt.datetime.now() < dt.timedelta(0) or c - dt.datetime.now() < dt.timedelta(0) > dt.timedelta(seconds = 86000):
                     # save messages
                     cp[i] += dt.timedelta(seconds = 20)
                     print('{} messages are: {}'.format(i+1, user_messages[i]))
+                    print(cp)
                     with open(['s1_messages.txt', 's2_messages.txt'][i], 'w') as f:
                         f.write(str(cp[i]))
                         f.write('\n')
