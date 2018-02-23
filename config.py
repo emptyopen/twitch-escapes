@@ -1,7 +1,7 @@
 import os
 
 
-DEBUG = True
+DEBUG = False
 
 STREAM_DELAY_OFFSET = 7
 
