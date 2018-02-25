@@ -6,9 +6,8 @@ import os
 HOST = "irc.twitch.tv"
 PORT = 6667
 
-f = open(os.pardir + '/oauth.txt')
-PASS = f.read()
-f.close()
+with open(os.pardir + '/auth/oauth.txt') as f:
+	PASS = f.read()
 
 IDENT = 'escape_bot'
 CHANNEL = 'twitch_escapes'

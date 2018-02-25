@@ -89,28 +89,19 @@ class Game:
         self.caption = "Twitch Escapes"
         self.fps = 60
         self.clock = pygame.time.Clock()
-        if DEBUG:
-            self.screen = pygame.display.set_mode((1780, 820))  # (850, 400)
-        else:
-            self.screen = pygame.display.set_mode((1780, 1020))  # (850, 400)
+        self.screen = pygame.display.set_mode((1780, 1020))  # (850, 400)
         self.background = pygame.image.load('pics/walls/n-wall.png')
         self.one_off = True # toggler that ensures screen updates after state update?
         self.p_offset = [30, 10] # offset for multiple screens
 
         # game state
         self.s = 0 # player state to display or update
-        if DEBUG:
-            self.num_players = [1]
-            self.state = ['n-wall']
-            self.action = ['stay']
-        else:
-            self.num_players = [1, 2, 3, 4] # extremely powerful
-            self.state = ['n-wall', 'e-wall', 's-wall', 'w-wall'] # THESE 3 NEED TO BE THE SAME SIZE
-            self.action = ['stay', 'stay', 'stay', 'stay']
+        self.state = ['n-wall', 'e-wall', 's-wall', 'w-wall']
+        self.action = ['stay', 'stay', 'stay', 'stay']
         self.win = False
         self.help = False
-        self.votes = {s:{} for s in self.num_players}
-        self.ready_time = [dt.datetime.now() for s in self.num_players]
+        self.votes = {s:{} for s in self.state}
+        self.ready_time = [dt.datetime.now() for s in self.state]
         self.inventory = []
         self.journal = ['0:0:0: Welcome to the Basement!']
         self.new_component_glow = [None, dt.datetime.now() + dt.timedelta(seconds = 0)]
@@ -146,7 +137,7 @@ class Game:
                             'comchest': Component('A chest with a combination', [0, 0, 2], {}, {}, [['knowledge'], ['inventory']]),
                             'hangman': Component('A game of hangman', [0, 0, 1], {}, {}, [['start', 'uncover', 'power'], ['uncover', 'power']]),
                             'blockpush': Component('A game of push the block', [0, 0, 1], {}, {}, [['start', 'inventory', 'uncover', 'power'], ['uncover', 'power', 'knowledge-keypadcode']]),
-                            'riddler': Component('A riddle game', [0, 0, 2], {}, {}, [['start', 'power'], ['uncover', 'power', 'knowledge-keypadcode']])
+                            'riddler': Component('A riddle game', [0, 0, 2], {}, {}, [['start', 'power'], ['uncover', 'power', 'knowledge-keypadcode']]),
                             'truculent': Component('A strange puzzle game', [0, 0, 2], {}, {}, [['start', 'power'], ['knowledge', 'power']])
                             }
 
@@ -426,34 +417,37 @@ class Game:
 
     def update_state(self):
 
-        if self.one_off:
+        ### Decide action
+        if DEBUG:
+            temp_action = raw_input('next action: ').lower()
+            self.action[0] = temp_action
+        else:
+            self.action[self.s] = self.parse_twitch_chat_file()
+            for i in range(len(self.action)):
+                if i != self.s:
+                    self.action[i] = 'stay'
 
-            s = self.s # shorten for convenience
+        # move onto next screen for next update
+        self.s += 1
+        if self.s >= len(self.state):
+            self.s = 0
 
+        print(self.action)
+
+        for s in range(len(self.action)):
+
+            # possible actions section
             always_actions = ['n-wall', 'e-wall', 'w-wall', 's-wall', 'help']
             possible_actions = ['stay']
-
             for component in self.components:
                 if self.state[s] == component:
-
                     possible_actions += self.components[component].actions_to_state.keys()   \
                                     + self.components[component].actions_to_inventory.keys()
-
             possible_actions += always_actions
-
             for action in possible_actions:
                 if action in self.components:
                     if not self.components[action].visible:
                         possible_actions.remove(action) # remove action if it is invisible
-
-            #print('Possible actions: {}\n'.format(possible_actions))
-
-
-            ### Decide action
-            if DEBUG:
-                self.action[s] = raw_input('next action for screen {}: '.format(s+1)).lower()
-            else:
-                self.action[s] = self.parse_twitch_chat_file()
 
             # Turn help on or off
             if self.action[s] == 'help on' or (self.action[s] == 'help' and self.help == False):
@@ -547,14 +541,6 @@ class Game:
                 self.jot('{}: You are free!')
                 self.win = True
 
-            self.s += 1
-            if self.s >= len(self.state):
-                self.s = 0
-
-        if self.one_off:
-            self.one_off = False
-        else:
-            self.one_off = True
 
 
     def activate_next_puzzle(self, component):
@@ -585,7 +571,7 @@ class Game:
 
             for s in range(len(self.state)): # iterate over players
 
-                self.screen.blit(self.background, (self.p_offset[0], self.p_offset[1]))
+                #self.screen.blit(self.background, (self.p_offset[0], self.p_offset[1]))
 
                 # offset two screens
                 if s == 0:
@@ -625,7 +611,7 @@ class Game:
                                         self.background.blit(pygame.image.load('pics/accs/glow.png'), (horz_plac, vert_plac))
                                     self.background.blit(c_image, (horz_plac, vert_plac))
                                     if self.help:
-                                        self.draw_message(component, (horz_plac + self.p_offset[0], vert_plac + self.p_offset[1]), preset = 'help')
+                                        self.draw_message(component, (horz_plac, vert_plac), preset = 'help')
 
                 elif self.state[s] == 'journal':
                     self.background = pygame.image.load('pics/accs/journal-full.png')
@@ -757,6 +743,8 @@ class Game:
                     self.draw_message('Left', (60 + self.p_offset[0], 450 + self.p_offset[1]), preset = 'help')
                     self.draw_message('Right', (800 + self.p_offset[0], 450 + self.p_offset[1]), preset = 'help')
 
+                self.screen.blit(self.background, (self.p_offset[0], self.p_offset[1]))
+
             # bottom
             statusbar = pygame.image.load('pics/accs/clean-bottom.png')
             self.screen.blit(statusbar, (0, 420))
@@ -802,10 +790,12 @@ class Game:
 
     def draw_message(self, message, coord = (100, 100), preset = None, font = FONT, font_size = FONTSIZE, text_color = (160, 190, 255), background_color = None, alpha = 255):
         message = message.upper()
+        screen_or_background = 'screen'
         if preset == 'journal':
             text_color = (0, 0, 0)
             font_size = FONTSIZE - 5
         if preset == 'help':
+            screen_or_background = 'background'
             background_color = (0, 0, 0)
             text_color = (255, 255, 255)
             alpha = 200
@@ -816,7 +806,10 @@ class Game:
             text_color = (0,0,0)
         font_object = pygame.font.SysFont(font, font_size).render(message, True, text_color, background_color)
         font_object.set_alpha(alpha)
-        self.screen.blit(font_object, coord)
+        if screen_or_background == 'screen':
+            self.screen.blit(font_object, coord)
+        else:
+            self.background.blit(font_object, coord)
 
 
 # ------------------------------------------------------------------------------------------------------------------- TWITCH
